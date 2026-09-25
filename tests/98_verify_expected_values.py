@@ -11,8 +11,13 @@
 
 # COMMAND ----------
 
+def q(sql):
+    """00_config の qualify() で名前を完全修飾してから実行する。"""
+    return spark.sql(qualify(sql))
+
+
 def one(sql):
-    return spark.sql(sql).collect()[0]
+    return q(sql).collect()[0]
 
 
 checks = []
@@ -59,7 +64,7 @@ check("JP-A11E は VEHICLE-003",
       one("SELECT max(canonical_vehicle_id) AS v FROM v_sales_resolved WHERE sales_vehicle_code = 'JP-A11E'").v, "VEHICLE-003")
 
 # Exercise 5 / 5B：レビューキュー（A014 承認後、根拠による候補化の後）
-queue = {row.source_code: row.review_category for row in spark.sql("SELECT source_code, review_category FROM v_alias_review_queue").collect()}
+queue = {row.source_code: row.review_category for row in q("SELECT source_code, review_category FROM v_alias_review_queue").collect()}
 check("レビューキュー（TH-Z999 は Exercise 8 で承認済み）", queue, {
     "MTO-988": "要確認", "CN-X12": "要確認（複数候補）", "MTO-990": "要確認（確定マスタの矛盾）",
     "KR-Q777": "未解決"})
@@ -67,14 +72,14 @@ check("レビューキュー（TH-Z999 は Exercise 8 で承認済み）", queue
 # Exercise 5B：根拠とスコア
 check("根拠の件数", one("SELECT count(*) AS n FROM alias_evidence").n, 7)
 scores = {(r.source_code, r.candidate_vehicle_id): r.evidence_score
-          for r in spark.sql("SELECT source_code, candidate_vehicle_id, evidence_score FROM v_evidence_score").collect()}
+          for r in q("SELECT source_code, candidate_vehicle_id, evidence_score FROM v_evidence_score").collect()}
 check("根拠スコア", scores, {("TH-Z999", "VEHICLE-001"): 88, ("KR-Q777", "VEHICLE-001"): 40, ("KR-Q777", "VEHICLE-004"): 8})
 check("TH-Z999 承認後の 2025-07 販売台数",
       one("""SELECT sales_volume AS v FROM v_vehicle_monthly_profitability
              WHERE canonical_vehicle_id = 'VEHICLE-001' AND month = DATE'2025-07-01'""").v, 3340)
 
 # Exercise 6：品質ルール
-dq = {row.rule_id: row.violations for row in spark.sql("SELECT rule_id, violations FROM v_dq_summary").collect()}
+dq = {row.rule_id: row.violations for row in q("SELECT rule_id, violations FROM v_dq_summary").collect()}
 check("DQ サマリ", dq, {"DQ-1": 1, "DQ-2": 2, "DQ-3": 1, "DQ-4": 1, "DQ-5": 4})
 check("タイヤ本数 MTO-987",
       one("SELECT sum(quantity_per_vehicle) AS q FROM vehicle_bom WHERE mto_code = 'MTO-987' AND part_category = 'TIRE'").q, 6)
@@ -99,7 +104,7 @@ t = one("SELECT * FROM v_data_trust_summary")
 check("データ信頼度の判定", t.trust_level, "要注意（重要な品質ルール違反あり）")
 check("集計に入っていない売上", float(t.unresolved_sales_amount), 344.0)
 check("承認待ちの候補", t.pending_candidates, 5)
-acts = {r.category: r.n for r in spark.sql("SELECT category, count(*) AS n FROM v_exec_action_items GROUP BY category").collect()}
+acts = {r.category: r.n for r in q("SELECT category, count(*) AS n FROM v_exec_action_items GROUP BY category").collect()}
 check("打ち手の一覧", acts, {"材料費の計画超過": 2, "コード未確定：要確認": 1, "コード未確定：要確認（複数候補）": 1,
                         "コード未確定：要確認（確定マスタの矛盾）": 1, "コード未確定：未解決": 1, "品質ルール違反": 3})
 

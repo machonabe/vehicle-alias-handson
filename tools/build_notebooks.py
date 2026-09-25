@@ -1,7 +1,8 @@
 """sql/*.sql・pages/*.md・README.md から Databricks 用の .ipynb を notebooks/ に生成する。
 
 使い方: python3 tools/build_notebooks.py
-- SQL は空行区切りの段落ごとに 1 セル（%sql）。コメントだけの段落は Markdown セルにする。
+- SQL は空行区切りの段落ごとに 1 セル。`run_sql(r"...")`（00_config で定義）で実行し、
+  テーブル・View・関数名に config のカタログ・スキーマを自動で付ける。コメントだけの段落は Markdown セルにする。
 - Exercise 7 のパラメータ（:h_xxx）用に、ウィジェット作成セル（Python）を自動で挿入する。
 - SQL の「-- @config-begin 〜 -- @config-end」（USE CATALOG / USE SCHEMA）は除去し、
   代わりに `%run ./00_config` セルを入れる。カタログ・スキーマ名は config/00_config.py で一元管理する。
@@ -20,6 +21,11 @@ SQL_KEYWORD = re.compile(r"^(SELECT|UPDATE|FROM|JOIN|WHERE|ORDER|GROUP|DROP|ALTE
 DELIMITER = re.compile(r"^[-=]{5,}$")
 CONFIG_BLOCK = re.compile(r"-- @config-begin.*?-- @config-end\n", re.S)
 RUN_CONFIG = "%run ./00_config"
+SQL_NOTE = ("このノートブックの SQL は `run_sql()`（`00_config` で定義）で実行します。"
+            "テーブル・View・関数の名前には、`00_config` のカタログ・スキーマが自動で付きます"
+            "（例：`sales_actual` → `workspace.vehicle_alias_handson.sales_actual`）。"
+            "**最初に `%run ./00_config` のセルを実行してください。**")
+WIDGET_NAMES = ("h_collect", "h_research", "h_matching", "h_quality", "h_aggregate", "h_review")
 CELL_SEP = "# COMMAND ----------"
 EXPECT_ERROR = "-- @expect-error"
 
@@ -106,18 +112,23 @@ def sql_to_cells(path):
             stmt = body.strip().rstrip(";")
             cells.append(code_cell(
                 "# 想定どおりエラーになることを確認するセル（エラー内容を表示して次へ進む）\n"
-                f'stmt = """{stmt}"""\n'
+                f'stmt = r"""{stmt}"""\n'
                 "try:\n"
-                "    spark.sql(stmt)\n"
+                "    spark.sql(qualify(stmt))\n"
                 '    print("⚠️ 成功してしまいました（想定外）")\n'
                 "except Exception as e:\n"
                 '    print("✅ 想定どおり失敗しました:", str(e).splitlines()[0][:300])'))
             continue
+        assert '"""' not in body, f"{path.name}: SQL に三重引用符は使えません"
         if ":h_collect" in body:
             cells.append(code_cell(WIDGETS))
-        cells.append(code_cell("%sql\n" + body))
+            args = "{k: dbutils.widgets.get(k) for k in " + repr(WIDGET_NAMES) + "}"
+            cells.append(code_cell(f'run_sql(r"""\n{body}\n""", args={args})'))
+        else:
+            cells.append(code_cell(f'run_sql(r"""\n{body}\n""")'))
     # タイトル（先頭の Markdown セル）の直後で共通設定を読み込む
     cells.insert(1, code_cell(RUN_CONFIG))
+    cells.insert(2, md_cell(SQL_NOTE))
     if path.stem == "99_cleanup":
         cells.append(code_cell(DROP_SCHEMA))
     return cells

@@ -135,7 +135,7 @@ tools/build_notebooks.py               sql/・pages/・config/・notebook_src/�
 3. `00_setup_tables_and_data` を開き、コンピュートに **Serverless** を選んで「すべて実行」します。
 4. 以降の Exercise のノートブックを、所要時間の表の順に開いて実行します（第1回：01 → 02 → 05 → 06、第2回：05b → 07 → 08 → 08b → 08c）。
 
-各ノートブックの先頭セル `%run ./00_config` が設定を読み込み、スキーマの作成と `USE CATALOG` / `USE SCHEMA` を行います。以降の `%sql` セルは、そのスキーマで動きます。ジョブから実行する場合は、パラメータ `catalog` / `schema` を渡すと設定値より優先されます。
+各ノートブックの先頭セル `%run ./00_config` が設定を読み込み、スキーマを作成します。ノートブックの SQL は `run_sql()`（`00_config` で定義）で実行します。テーブル・View・関数の名前には `00_config` のカタログ・スキーマが自動で付く（例：`sales_actual` → `workspace.vehicle_alias_handson.sales_actual`）ので、`USE` の状態やコンピュートの種類に左右されません。**各ノートブックでは、最初に `%run ./00_config` のセルを実行してください。**ジョブから実行する場合は、パラメータ `catalog` / `schema` / `warehouse_id` / `dashboard_parent_path` を渡すと設定値より優先されます。
 
 **SQL エディタで実施する場合：**`sql/*.sql` の冒頭にある `-- @config-begin` 〜 `-- @config-end` の `USE` 文を、`00_config` と同じ値に書き換えてから実行します。
 
@@ -769,6 +769,7 @@ Q14 の「タイヤ本数の超過が原因」は、架空データ上の筋書�
 
 | 症状 | 原因と対処 |
 |---|---|
+| `TABLE_OR_VIEW_NOT_FOUND`（例：`sales_actual` が見つからない）、`norm_code` が見つからない | ①ノートブックの最初の `%run ./00_config` を実行していない（`run_sql` が未定義のエラーになる場合も同じ）②前の Exercise を実行していない（例：Exercise 2 の前に `00_setup` を実行していない）③別のスキーマの `00_config` を使っている。ノートブックを上から順に実行し直す |
 | `%run ./00_config` で「ノートブックが見つからない」 | `00_config` が同じフォルダにない。すべてのノートブックを同じフォルダにインポートする |
 | `00_config` でカタログがない・権限エラー | Free Edition では `catalog` を `workspace` にする。社内ワークスペースでは講師が作成したカタログ名にするか、講師に `USE CATALOG` と `CREATE SCHEMA` の付与を依頼する |
 | 別の人のデータと混ざる | 1つのワークスペースを共有している。`00_config` の `schema` を人ごとに変える |
