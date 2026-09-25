@@ -1,0 +1,6 @@
+履歴ID,元システム,国,業務領域,元の名称,元のコード,対応づけた共通機種ID,適用開始日,適用終了日,状態,承認部署,承認日,元資料
+H001,CN_SALES_LEGACY,CN,SALES,阿尔法,CN-X123B,VEHICLE-001,2024-07-01,2025-05-31,APPROVED,中国営業企画（架空）,2024-06-20,Alpha系列 名称対応表 v3.xlsx（架空）
+H002,COST_SHEET,JP,PRODUCTION,ALPHA 11 M,,VEHICLE-001,,,APPROVED,原価企画（架空）,2024-03-10,原価積上げシート_A11.xlsx（架空）
+H003,COST_SHEET,JP,PRODUCTION,Ａｌｐｈａ　１１Ｍ,,VEHICLE-001,,,APPROVED,原価企画（架空）,2024-03-10,原価積上げシート_A11.xlsx（架空）
+H004,COST_SHEET,JP,SALES,alpha,,,,,UNKNOWN,原価企画（架空）,2024-03-10,原価積上げシート_A11.xlsx（架空）
+H005,CN_SALES_LEGACY,CN,SALES,阿爾法,,,,,UNKNOWN,中国営業企画（架空）,2024-06-20,Alpha系列 名称対応表 v3.xlsx（架空）

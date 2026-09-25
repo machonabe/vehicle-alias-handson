@@ -15,6 +15,16 @@
 
 # COMMAND ----------
 
+# MAGIC %md
+# MAGIC ### ダッシュボードの定義を読み込み、データセットを検証する
+# MAGIC
+# MAGIC > **💡 解説**
+# MAGIC > - **なぜ**：ダッシュボードの中の SQL が1つでも失敗すると、画面にエラーが出ます。配置する前に、すべてのデータセットの SQL を実行して確かめます。
+# MAGIC > - **仕組み**：ダッシュボードの定義（JSON）の `__FQ__` を、00_config のカタログ・スキーマに置き換えます。そのうえで、わざと別のスキーマ（`information_schema`）に切り替えてから各 SQL を実行します。ダッシュボードは `USE` なしで実行されるので、名前が完全な形になっていないと、ここで失敗して気づけます。
+# MAGIC > - **利点**：ダッシュボードの定義を JSON としてファイルで管理できるので、Git で変更を追えます。環境（カタログ・スキーマ）が違っても、同じ定義を使い回せます。
+
+# COMMAND ----------
+
 import json
 import posixpath
 
@@ -35,6 +45,16 @@ try:
         print(f"✅ {ds['displayName']}: {rows} 行")
 finally:
     spark.sql(f"USE SCHEMA `{SCHEMA}`")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### ダッシュボードを作成（または更新）して公開する
+# MAGIC
+# MAGIC > **💡 解説**
+# MAGIC > - **仕組み**：Databricks SDK の `WorkspaceClient` は、ノートブックの実行者の権限で REST API を呼び出します。同じ名前のダッシュボードがあれば更新（PATCH）、無ければ作成（POST）し、最後に公開（published）します。`embed_credentials: True` で、公開したダッシュボードは作成者の権限でデータを読みます。
+# MAGIC > - **利点**：何度実行しても、ダッシュボードは1つのまま最新の定義に更新され、URL も変わりません。講師の事前準備やジョブによる自動化にも、そのまま使えます。
+# MAGIC > - **補足**：SQL Warehouse は 00_config の `warehouse_id` を使います。空の場合は、起動中の Warehouse、無ければ最初の Warehouse を自動で選びます（Free Edition では、既定の Warehouse が1つだけあります）。
 
 # COMMAND ----------
 

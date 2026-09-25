@@ -3,11 +3,13 @@
 -- 注意 : 以下の時間はすべて「PoC で測定すべき仮説」です。確定した効果ではありません。
 --        現状の時間（合計 100 時間）も説明用の架空の値です。実際の内訳は業務担当者へのヒアリングや PoC の実測で置き換えてください。
 -- =====================================================================
+-- 💡 なぜ：効果を断定せず、工程ごとの仮説として置き、PoC で何を測るかを決めます。
 -- @config-begin  ノートブック版では 00_config がカタログ・スキーマを設定するため、この範囲は自動で除去されます
 USE CATALOG workspace;             -- ★ SQL エディタで実行する場合は config/00_config と同じ値にする
 USE SCHEMA vehicle_alias_handson;  -- ★ 同上
 -- @config-end
 
+-- 💡 仕組み：工程・現状の時間・導入後の想定・手段・PoC で測ることを、1行ずつ持つ表です。
 CREATE OR REPLACE TABLE effort_estimate (
   task_order        INT,
   task              STRING  COMMENT '作業工程',
@@ -17,6 +19,7 @@ CREATE OR REPLACE TABLE effort_estimate (
   poc_measurement   STRING  COMMENT 'PoC で何を測るか'
 ) COMMENT '業務効果試算（仮説）。PoC で実測して検証する。';
 
+-- 💡 仕組み：時間はすべて説明用の架空の値です。
 INSERT INTO effort_estimate VALUES
  (1,'データ収集'        ,22, 8,'計画・販売・生産を Delta に集約（元システムは変更しない）'          ,'データ取得〜集計可能状態までの時間'),
  (2,'名称・コード調査'  ,20, 5,'Discover Page で正式定義・別名を参照、Genie One で質問'              ,'「このコードは何の車両か」の調査1件あたり時間・件数'),
@@ -26,6 +29,7 @@ INSERT INTO effort_estimate VALUES
  (6,'レビュー'          , 8, 6,'根拠（Page・対応表の承認記録）を添えたレビュー。判断自体は人が行う','レビュー時間、差し戻し件数');
 
 -- 7-1. 仮説値で試算
+-- 💡 仕組み：工程ごとの行に、合計の行を `UNION ALL` で足しています。
 SELECT task, current_hours, target_hours,
        current_hours - target_hours                                  AS saved_hours,
        round((current_hours - target_hours) / current_hours * 100, 1) AS saved_pct,
@@ -40,6 +44,9 @@ FROM effort_estimate;
 -- 期待値（仮説値のまま）: 100h → 32h、削減 68h、削減率 68.0%（すべて架空の値）
 
 -- 7-2. 参加者が自分の想定値を入力して試算する（SQL エディタのパラメータ :h_xxx に数値を入力）
+-- 💡 なぜ：参加者が自分の想定値を入れて、削減の見込みを試算します。
+-- 💡 仕組み：`:h_collect` のような名前付きパラメータを使います。ノートブックでは、ウィジェットの値を `run_sql(..., args=...)` で渡します。値は文字列なので `CAST(... AS DOUBLE)` で数値にします。ウィンドウ関数 `sum(...) OVER ()` で、行ごとの値と合計を同時に出しています。
+-- 💡 利点：SQL を書き換えずに、条件だけを変えて何度でも試せます。
 WITH input AS (
   SELECT * FROM VALUES
     ('データ収集'      , CAST(:h_collect   AS DOUBLE)),

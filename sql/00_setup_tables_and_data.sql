@@ -5,6 +5,9 @@
 -- 注意 : すべての名称・コード・数値・部署名は架空です。実在企業の機密データは含みません。
 --        金額の単位はすべて「百万円」、台数の単位は「台」です。
 -- =====================================================================
+-- 💡 なぜ：元システム（開発・販売・生産）は変更せず、その写しを Databricks の Delta テーブルとして用意します。名称・コードの対応づけは、すべて Databricks 側で行う前提です。
+-- 💡 仕組み：テーブルはすべて Unity Catalog のマネージドテーブル（Delta 形式）です。`CREATE OR REPLACE` を使っているので、何度実行しても同じ初期状態に戻ります。
+-- 💡 利点：途中で失敗したり、データを変えすぎたりしても、このノートブックを再実行すれば最初からやり直せます。
 
 -- @config-begin  ノートブック版では 00_config がカタログ・スキーマを設定するため、この範囲は自動で除去されます
 -- カタログ・スキーマ（既定値は Free Edition の既定カタログ workspace に作成する設定）
@@ -20,6 +23,9 @@ USE SCHEMA vehicle_alias_handson;  -- ★ 同上
 -- 0. 正規化関数（全角→半角、大文字化、記号・空白除去）
 -- ---------------------------------------------------------------------
 -- コード用 : 英数字以外をすべて除去する   'ＪＰ－Ａ１１' / 'jp-a11 ' → 'JPA11'
+-- 💡 なぜ：「JP-A11」「jp-a11 」「ＪＰ－Ａ１１」のような表記揺れを、人が目で見て同じと判断する代わりに、決まったルールでそろえるためです。
+-- 💡 仕組み：SQL で書いた関数（SQL UDF）を Unity Catalog に登録します。`translate` で全角を半角に、`upper` で大文字に、`regexp_replace` で英数字以外を取り除きます。
+-- 💡 利点：関数として1か所に定義するので、View・品質チェック・根拠の抽出のどこでも同じルールが使われます。ルールを直すときも、1か所の修正で済みます。
 CREATE OR REPLACE FUNCTION norm_code(s STRING)
 RETURNS STRING
 COMMENT '機種コードの表記揺れ正規化（全角→半角、大文字化、英数字以外を除去）'
@@ -30,6 +36,9 @@ RETURN regexp_replace(
   '[^A-Z0-9]', '');
 
 -- 名称用 : 漢字等は残し、空白・記号のみ除去する   'Ａｌｐｈａ　１１Ｍ' / 'ALPHA 11 M' → 'ALPHA11M'
+-- 💡 なぜ：名称には漢字やかなが含まれるため、コードと同じように英数字以外を消すと意味が失われます。空白と記号だけを取り除く、名称用の関数を分けます。
+-- 💡 仕組み：簡体字と繁体字（阿尔法／阿爾法）の変換は、あえて行いません。機械的な変換で誤って同じとみなすより、人の確認に回す方針です。
+-- 💡 利点：どこまでを自動でそろえ、どこからを人が判断するかの境界が、関数の定義として明確になります。
 CREATE OR REPLACE FUNCTION norm_name(s STRING)
 RETURNS STRING
 COMMENT '車種名称の表記揺れ正規化（全角→半角、大文字化、空白・記号を除去。簡体字/繁体字の変換は行わない）'
@@ -42,6 +51,9 @@ RETURN regexp_replace(
 -- ---------------------------------------------------------------------
 -- 1. canonical_vehicle : 共通機種（人が定義した「同じ車両」の単位）
 -- ---------------------------------------------------------------------
+-- 💡 なぜ：「同じ車両」の単位（共通機種ID）を、どのシステムのコードでもない、人が定義した概念として持つためです。
+-- 💡 仕組み：1行が1つの共通機種です。世代・派生車（EV）・系列が違えば別の ID にします。
+-- 💡 利点：列やテーブルのコメントは Unity Catalog に保存されます。カタログエクスプローラーや Genie が、列の意味を理解する手がかりになります。
 CREATE OR REPLACE TABLE canonical_vehicle (
   canonical_vehicle_id STRING NOT NULL COMMENT '共通機種ID（例: VEHICLE-001）',
   global_vehicle_name  STRING NOT NULL COMMENT 'グローバル名称',
@@ -53,6 +65,7 @@ CREATE OR REPLACE TABLE canonical_vehicle (
   description          STRING COMMENT '補足'
 ) COMMENT '共通機種マスタ（架空）。1行=1つの「同じ車両」概念。';
 
+-- 💡 なぜ：先代（10th Gen）や派生EVなど、「名前は似ているが別の車両」をあえて入れています。名称だけで判断する危うさを、演習で確かめられるようにするためです。
 INSERT INTO canonical_vehicle VALUES
  ('VEHICLE-001','Model Alpha 11th Gen'   ,'Alpha',11,'ICE / HEV','ACTIVE' ,DATE'2024-04-01','Alpha系列 第11世代。ガソリン・HEVを含む'),
  ('VEHICLE-002','Model Alpha 10th Gen'   ,'Alpha',10,'ICE'        ,'RUN_OUT',DATE'2019-04-01','Alpha系列 第10世代（先代）。名称「Alpha」は共通だが別機種'),
@@ -62,6 +75,9 @@ INSERT INTO canonical_vehicle VALUES
 -- ---------------------------------------------------------------------
 -- 2. vehicle_alias_master : 国・部門・システム別の名称/コード → 共通機種ID 対応表
 -- ---------------------------------------------------------------------
+-- 💡 なぜ：元システムに「共通機種ID」の列を足せないため、コードと共通機種IDの対応を Databricks 側の表として持ちます。
+-- 💡 仕組み：業務領域・国・適用期間・承認状態・信頼度・根拠資料を1行ずつ持ちます。集計に使うのは `approval_status` が APPROVED の行だけです。
+-- 💡 利点：対応の「確定」と「候補」を同じ表で管理しつつ、状態で使い分けられます。誰が何を根拠に承認したかも残ります。
 CREATE OR REPLACE TABLE vehicle_alias_master (
   alias_id             STRING NOT NULL COMMENT '対応レコードID',
   canonical_vehicle_id STRING COMMENT '共通機種ID',
@@ -80,6 +96,8 @@ CREATE OR REPLACE TABLE vehicle_alias_master (
   updated_at           TIMESTAMP COMMENT '更新日時'
 ) COMMENT '車両名称・機種コード対応表（架空）。確定的な集計には approval_status = APPROVED の行のみを使用する。';
 
+-- 💡 なぜ：完全一致・世代違い・派生車・マスタの矛盾・候補・必須項目の欠損など、実務で起きるケースを一通り入れています。
+-- 💡 利点：後の Exercise で、どのケースが自動で変換され、どれが人の確認に回るかを具体的に確かめられます。
 INSERT INTO vehicle_alias_master VALUES
  -- 完全一致で対応できる確定コード（Model Alpha 11th Gen）
  ('A001','VEHICLE-001','JP'    ,'SALES'      ,'Alpha'      ,'JP-A11'  ,DATE'2024-04-01',DATE'9999-12-31','APPROVED',100,'SPEC_MASTER','SPEC-A11-ALIAS-001 Rev.3（架空）','商品企画部（架空）',NULL,current_timestamp()),
@@ -109,34 +127,10 @@ INSERT INTO vehicle_alias_master VALUES
  ('A019','VEHICLE-001','JP'    ,'AFTERSALES' ,'Alpha Service',NULL    ,NULL           ,NULL            ,'PENDING' ,NULL,'MANUAL_ENTRY',NULL,NULL,'登録途中',current_timestamp());
 
 -- ---------------------------------------------------------------------
--- 3. alias_mapping_history : 過去に人手で作成した対応履歴（Excel取込を想定）
--- ---------------------------------------------------------------------
-CREATE OR REPLACE TABLE alias_mapping_history (
-  history_id        STRING NOT NULL COMMENT '履歴ID',
-  source_system     STRING COMMENT '元システム / 元資料',
-  country           STRING COMMENT '国',
-  business_area     STRING COMMENT '業務領域',
-  source_name       STRING COMMENT '元資料上の名称（表記揺れあり）',
-  source_code       STRING COMMENT '元資料上のコード（無い場合あり）',
-  mapped_vehicle_id STRING COMMENT '人が対応づけた共通機種ID（不明なら NULL）',
-  valid_from        DATE,
-  valid_to          DATE,
-  history_status    STRING COMMENT 'APPROVED / UNKNOWN',
-  approved_by       STRING COMMENT '承認した部署・役割（架空）',
-  approved_at       DATE,
-  source_document   STRING COMMENT '元資料名（架空）'
-) COMMENT '過去の人手対応履歴（架空）。一部のみ存在し、名称だけのものもある。';
-
-INSERT INTO alias_mapping_history VALUES
- ('H001','CN_SALES_LEGACY','CN','SALES'     ,'阿尔法'           ,'CN-X123B','VEHICLE-001',DATE'2024-07-01',DATE'2025-05-31','APPROVED','中国営業企画（架空）',DATE'2024-06-20','Alpha系列 名称対応表 v3.xlsx（架空）'),
- ('H002','COST_SHEET'     ,'JP','PRODUCTION','ALPHA 11 M'       ,NULL      ,'VEHICLE-001',NULL,NULL,'APPROVED','原価企画（架空）',DATE'2024-03-10','原価積上げシート_A11.xlsx（架空）'),
- ('H003','COST_SHEET'     ,'JP','PRODUCTION','Ａｌｐｈａ　１１Ｍ',NULL      ,'VEHICLE-001',NULL,NULL,'APPROVED','原価企画（架空）',DATE'2024-03-10','原価積上げシート_A11.xlsx（架空）'),
- ('H004','COST_SHEET'     ,'JP','SALES'     ,'alpha'            ,NULL      ,NULL         ,NULL,NULL,'UNKNOWN' ,'原価企画（架空）',DATE'2024-03-10','原価積上げシート_A11.xlsx（架空）'),
- ('H005','CN_SALES_LEGACY','CN','SALES'     ,'阿爾法'           ,NULL      ,NULL         ,NULL,NULL,'UNKNOWN' ,'中国営業企画（架空）',DATE'2024-06-20','Alpha系列 名称対応表 v3.xlsx（架空）');
-
--- ---------------------------------------------------------------------
 -- 4. development_plan : 開発計画（開発コード × 月）
 -- ---------------------------------------------------------------------
+-- 💡 なぜ：開発計画は開発コード（DEV-xxx）単位で、販売・生産とはコード体系も粒度も違う、という状況を再現します。
+-- 💡 利点：Exercise 1 で「このままでは結合できない」ことを体験できます。
 CREATE OR REPLACE TABLE development_plan (
   plan_record_id           STRING NOT NULL,
   development_vehicle_code STRING COMMENT '開発コード（DEV-xxx）',
@@ -148,6 +142,7 @@ CREATE OR REPLACE TABLE development_plan (
   plan_version             STRING COMMENT '計画版'
 ) COMMENT '開発計画（架空）。開発コード単位で、販売・生産とはコード体系が異なる。';
 
+-- 💡 仕組み：金額は百万円、期間は 2025-04〜2025-09 の月次です（すべて架空）。
 INSERT INTO development_plan VALUES
  ('D001','DEV-A11' ,2025,DATE'2025-04-01',3500,6300,10500,'FY25-v2'),
  ('D002','DEV-A11' ,2025,DATE'2025-05-01',3500,6300,10500,'FY25-v2'),
@@ -162,6 +157,8 @@ INSERT INTO development_plan VALUES
 -- ---------------------------------------------------------------------
 -- 5. sales_actual : 販売実績（国 × 販売コード × パワートレイン × 月）
 -- ---------------------------------------------------------------------
+-- 💡 なぜ：販売は、国・販売コード・パワートレイン・月の粒度で管理されている、という状況を再現します。
+-- 💡 仕組み：`source_system` 列に元システムを残し、どのシステム由来のデータかを追えるようにします。
 CREATE OR REPLACE TABLE sales_actual (
   sales_record_id    STRING NOT NULL,
   country            STRING COMMENT '販売国',
@@ -174,6 +171,8 @@ CREATE OR REPLACE TABLE sales_actual (
   source_system      STRING COMMENT '元システム'
 ) COMMENT '販売実績（架空）。営業は車種・ドア・パワートレイン単位で管理。';
 
+-- 💡 なぜ：表記揺れ（小文字・全角）、旧システムのコード、先代・派生EV、候補しかないコード、対応表に無いコードを混ぜています。
+-- 💡 利点：変換ルールごとの効果（何行を救えるか）を、数字で確かめられます。
 INSERT INTO sales_actual VALUES
  ('S001','JP','JP-A11'     ,'HEV','5D',1200,4080,DATE'2025-04-01','JP_SALES'),
  ('S002','JP','JP-A11'     ,'GAS'  ,'5D', 800,2400,DATE'2025-04-01','JP_SALES'),
@@ -205,6 +204,7 @@ INSERT INTO sales_actual VALUES
 -- ---------------------------------------------------------------------
 -- 6. production_actual : 生産実績（MTOコード × 月）
 -- ---------------------------------------------------------------------
+-- 💡 なぜ：生産は MTO コード単位で、販売とは粒度もコード体系も違います。
 CREATE OR REPLACE TABLE production_actual (
   production_record_id STRING NOT NULL,
   plant_code           STRING COMMENT '工場（架空）',
@@ -214,6 +214,7 @@ CREATE OR REPLACE TABLE production_actual (
   production_month     DATE   COMMENT '生産月（月初日）'
 ) COMMENT '生産実績（架空）。生産は MTO・部品単位で管理。';
 
+-- 💡 なぜ：8月の材料費を意図的に高くしています。第2回の経営ダッシュボードで、この異常から部品表の品質問題にたどり着く筋書きのためです（架空の設定）。
 INSERT INTO production_actual VALUES
  ('P001','PLANT-J1','MTO-987' ,3300,6110,DATE'2025-04-01'),
  ('P002','PLANT-J1','MTO-987' ,3350,6200,DATE'2025-05-01'),
@@ -230,6 +231,7 @@ INSERT INTO production_actual VALUES
 -- ---------------------------------------------------------------------
 -- 7. vehicle_bom : 部品表（MTO × 部品）
 -- ---------------------------------------------------------------------
+-- 💡 なぜ：部品表は、取り込みの重複や旧版の残存が起きやすく、原価の積み上げを狂わせる原因になります。
 CREATE OR REPLACE TABLE vehicle_bom (
   bom_line_id          STRING NOT NULL,
   mto_code             STRING COMMENT 'MTOコード',
@@ -242,6 +244,8 @@ CREATE OR REPLACE TABLE vehicle_bom (
   loaded_at            TIMESTAMP COMMENT '取込日時'
 ) COMMENT '部品表（架空）。重複取込・旧版残存による不整合を含む。';
 
+-- 💡 仕組み：MTO-987 のタイヤに、正しい行（4本）と旧版の残り（2本）を入れて、合計6本にしています。12V バッテリーは二重に取り込まれています。
+-- 💡 利点：Exercise 6 で、品質ルールがこれらを決定的に見つけることを確かめられます。
 INSERT INTO vehicle_bom VALUES
  ('B001','MTO-987','ENGINE' ,'EN-15T'      ,'1.5L エンジン（架空）'     ,1,'B','PROD_BOM',TIMESTAMP'2025-07-31 02:00:00'),
  ('B002','MTO-987','MOTOR'  ,'MT-H01'      ,'HEVモーター（架空）'       ,1,'B','PROD_BOM',TIMESTAMP'2025-07-31 02:00:00'),
@@ -259,18 +263,20 @@ INSERT INTO vehicle_bom VALUES
 -- ---------------------------------------------------------------------
 -- 8. 業務ドメインのタグ付け（Domains UI が使えない場合の代替・検索性向上）
 -- ---------------------------------------------------------------------
+-- 💡 なぜ：Domains の画面が使えない環境でも、どのテーブルが「Vehicle Profitability」の業務に属するかを検索できるようにします。
+-- 💡 仕組み：Unity Catalog のタグ（キーと値）をテーブルに付けます。組織のタグポリシーとぶつからないよう、ハンズオン専用のキーを使っています。
+-- 💡 利点：タグは、検索・権限管理・コストの集計などに使えます。Genie もテーブルを探す手がかりにできます。
 ALTER TABLE canonical_vehicle     SET TAGS ('handson_business_domain' = 'Vehicle Profitability');
 ALTER TABLE vehicle_alias_master  SET TAGS ('handson_business_domain' = 'Vehicle Profitability', 'data_role' = 'mapping_master');
-ALTER TABLE alias_mapping_history SET TAGS ('handson_business_domain' = 'Vehicle Profitability', 'data_role' = 'mapping_history');
 ALTER TABLE development_plan      SET TAGS ('handson_business_domain' = 'Vehicle Profitability', 'data_role' = 'plan');
 ALTER TABLE sales_actual          SET TAGS ('handson_business_domain' = 'Vehicle Profitability', 'data_role' = 'actual');
 ALTER TABLE production_actual     SET TAGS ('handson_business_domain' = 'Vehicle Profitability', 'data_role' = 'actual');
 ALTER TABLE vehicle_bom           SET TAGS ('handson_business_domain' = 'Vehicle Profitability', 'data_role' = 'bom');
 
--- 件数確認（期待値: 4 / 19 / 5 / 9 / 26 / 11 / 12）
+-- 件数確認（期待値: 4 / 19 / 9 / 26 / 11 / 12）。過去の人手承認履歴は Exercise 2-0 で Excel から取り込む
+-- 💡 なぜ：初期データが想定どおりにできたかを、次に進む前に確かめます。
 SELECT 'canonical_vehicle' AS t, count(*) AS n FROM canonical_vehicle UNION ALL
 SELECT 'vehicle_alias_master' , count(*) FROM vehicle_alias_master  UNION ALL
-SELECT 'alias_mapping_history', count(*) FROM alias_mapping_history UNION ALL
 SELECT 'development_plan'     , count(*) FROM development_plan      UNION ALL
 SELECT 'sales_actual'         , count(*) FROM sales_actual          UNION ALL
 SELECT 'production_actual'    , count(*) FROM production_actual     UNION ALL

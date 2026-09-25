@@ -8,6 +8,8 @@
 --   候補が複数 : 点数に関わらず人による確認（70点未満のみなら未解決）
 --   マスタ矛盾 : 人による確認（確定済み対応の修正が必要）
 -- =====================================================================
+-- 💡 なぜ：自動で決められないデータを、信頼度に応じて「承認候補・要確認・未解決」に分け、人の判断を効率よく回します。
+-- 💡 仕組み：AI やルールによる候補は CANDIDATE として持ち、人が承認して初めて APPROVED になります。
 -- @config-begin  ノートブック版では 00_config がカタログ・スキーマを設定するため、この範囲は自動で除去されます
 USE CATALOG workspace;             -- ★ SQL エディタで実行する場合は config/00_config と同じ値にする
 USE SCHEMA vehicle_alias_handson;  -- ★ 同上
@@ -16,6 +18,9 @@ USE SCHEMA vehicle_alias_handson;  -- ★ 同上
 -- ---------------------------------------------------------------------
 -- 5-1. レビューキュー View：未解決レコードごとに候補と信頼度を並べ、分類する
 -- ---------------------------------------------------------------------
+-- 💡 なぜ：未解決のコードごとに、候補・スコア・影響額を1行にまとめ、担当者が優先順位をつけて確認できるようにします。
+-- 💡 仕組み：候補は `named_struct`（名前付きの構造体）の配列にまとめ、`array_sort` とラムダ式 `(l, r) -> r.score - l.score` でスコアの高い順に並べます。分類は CASE 式の順番で決まり、「マスタの矛盾」「候補なし」「70点未満」「複数候補」を先に判定します。
+-- 💡 利点：分類のルールが SQL として明示されるので、なぜその分類になったかを誰でも確認できます。
 CREATE OR REPLACE VIEW v_alias_review_queue
 COMMENT '共通機種IDに変換できなかったコードの確認キュー。AI候補は判断支援であり確定ではない。'
 AS
@@ -62,6 +67,7 @@ SELECT
   END AS review_category
 FROM joined;
 
+-- 💡 なぜ：分類の結果を、確認の優先順に並べて見ます。
 SELECT review_category, business_area, source_code, top_score, candidate_count,
        affected_volume, affected_amount, amount_type, candidate_list
 FROM v_alias_review_queue
@@ -77,6 +83,7 @@ ORDER BY CASE review_category WHEN '自動承認候補' THEN 1 WHEN '要確認' 
 --   未解決（候補なし）         : KR-Q777
 
 -- 5-2. 分類ごとの影響（集計から除外されている台数・金額）
+-- 💡 なぜ：分類ごとに、集計から外れている台数と金額を示します。影響の大きいものから確認できます。
 SELECT review_category, amount_type,
        count(*) AS codes, sum(affected_volume) AS volume, sum(affected_amount) AS amount_million_jpy
 FROM v_alias_review_queue
@@ -87,6 +94,9 @@ ORDER BY review_category;
 -- 5-3. 担当者の判断を記録する（ここでは講師の指示で JP-A11-SE を承認する例）
 --       ※ 実務では承認者・承認日時・根拠資料を必ず残す。個人名ではなく役割名で記録する例にしている。
 -- ---------------------------------------------------------------------
+-- 💡 なぜ：担当者の判断を、承認者（役割名）と根拠資料とともに記録します。
+-- 💡 仕組み：Delta テーブルは UPDATE を直接実行でき、変更はテーブルの履歴に残ります。
+-- 💡 利点：確定の操作が1回の更新で済み、その結果は再集計なしで View に反映されます。
 UPDATE vehicle_alias_master
 SET approval_status = 'APPROVED',
     mapping_method  = 'HUMAN_REVIEWED',
@@ -102,13 +112,19 @@ WHERE alias_id = 'A014';
 -- UPDATE vehicle_alias_master SET approval_status = 'REJECTED', updated_at = current_timestamp() WHERE alias_id = 'A017';
 
 -- 5-4. 承認の効果を確認：2025-09 の販売台数が 3,470 → 3,590 台に増える（View は自動で最新化）
+-- 💡 なぜ：承認という1回の更新で、採算の数字が変わることを確かめます。View は参照のたびに計算し直すため、再集計の作業はいりません。
 SELECT month, sales_volume, actual_sales
 FROM v_vehicle_monthly_profitability
 WHERE canonical_vehicle_id = 'VEHICLE-001' AND month = DATE'2025-09-01';
 
 -- 5-5. 監査：Delta の履歴で「いつ・誰が・何を変えたか」を確認し、必要なら過去版と比較
+-- 💡 なぜ：対応表を「いつ・誰が・どの操作で」変えたかを確かめます。
+-- 💡 仕組み：Delta は、テーブルへの変更をトランザクションログに記録しています。`DESCRIBE HISTORY` で、その一覧を見られます。
+-- 💡 利点：監査のために別の仕組みを作らなくても、変更の記録が残ります。
 DESCRIBE HISTORY vehicle_alias_master;
 
+-- 💡 仕組み：タイムトラベル（`VERSION AS OF`）で、変更前の状態を読み出して比べます。
+-- 💡 利点：誤って承認しても、いつの状態に戻せばよいかが分かります。
 SELECT alias_id, approval_status, mapping_method, approved_by
 FROM vehicle_alias_master VERSION AS OF 1     -- ★ DESCRIBE HISTORY で operation = WRITE（初回INSERT）の version に変更
 WHERE alias_id = 'A014';

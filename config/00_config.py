@@ -16,6 +16,16 @@
 
 # COMMAND ----------
 
+# MAGIC %md
+# MAGIC ### 設定値（ここだけ編集します）
+# MAGIC
+# MAGIC > **💡 解説**
+# MAGIC > - **なぜ**：カタログ名・スキーマ名などの環境ごとに違う値を、全ノートブックで1か所にまとめます。環境を変えるときに、このセルだけ直せば済みます。
+# MAGIC > - **仕組み**：各ノートブックの先頭の `%run ./00_config` は、このノートブックを同じ実行環境の中で実行します。ここで作った変数（`CATALOG`・`SCHEMA`）や関数（`run_sql`）を、呼び出した側のノートブックでそのまま使えます。
+# MAGIC > - **利点**：Free Edition では既定値のまま動きます。ジョブやウィジェットから値を渡せば、ノートブックを書き換えずに別のスキーマで実行することもできます（講師用・参加者用・テスト用を分けられます）。
+
+# COMMAND ----------
+
 # ===== ここだけ編集してください =====
 CONFIG = {
     "catalog": "workspace",               # Free Edition の既定カタログ。社内ワークスペースでは講師が用意したカタログ名
@@ -24,6 +34,16 @@ CONFIG = {
     "warehouse_id": "",                   # 経営ダッシュボード（08b）で使う SQL Warehouse。空なら自動で選ぶ
     "dashboard_parent_path": "",          # 経営ダッシュボードの置き場所。空ならノートブックと同じフォルダ（Git フォルダで使う場合は外のフォルダを指定）
 }
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### 設定の読み込み、スキーマの作成、SQL を実行する関数の定義（編集不要）
+# MAGIC
+# MAGIC > **💡 解説**
+# MAGIC > - **なぜ**：SQL がテーブル名を「今選ばれているスキーマ」から探す書き方だと、コンピュートの種類や実行のしかたによっては `USE` が効かず、`TABLE_OR_VIEW_NOT_FOUND` などのエラーになります。そこで、実行する前に名前を `カタログ.スキーマ.テーブル` の完全な形に書き換えます。
+# MAGIC > - **仕組み**：`run_sql()` は、SQL を文字列リテラル・識別子・コメントとそれ以外に分けます（`_lex`）。それ以外の部分にあるハンズオンのテーブル・View・関数・Volume の名前（`HANDSON_OBJECTS`）だけに、`カタログ.スキーマ.` を付けます（`qualify`）。そのうえで、セミコロンで区切った文を1つずつ `spark.sql()` で実行し、最後の結果を表示します。
+# MAGIC > - **利点**：ノートブックの SQL は、テーブル名だけの読みやすい形のままです。それでも実行時には必ず 00_config のスキーマを使うので、どのセルから実行しても同じ結果になります。文字列の中（例：メモの本文）は書き換えないので、データの値は変わりません。
 
 # COMMAND ----------
 
@@ -71,6 +91,8 @@ HANDSON_OBJECTS = [
     "mv_vehicle_profitability", "v_data_trust_summary", "v_exec_action_items",
     # 関数
     "norm_code", "norm_name",
+    # Volume
+    "handson_files",
 ]
 _NAME_RE = re.compile(r"(?<![\w.`])(" + "|".join(sorted(HANDSON_OBJECTS, key=len, reverse=True)) + r")\b")
 

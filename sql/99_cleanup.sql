@@ -9,8 +9,10 @@ USE SCHEMA vehicle_alias_handson;  -- ★ 同上
 -- @config-end
 
 -- 削除対象の確認
+-- 💡 仕組み：`run_sql()` が `IN カタログ.スキーマ` を付けて、00_config のスキーマの中の一覧を表示します（SQL エディタでは、選んでいるスキーマの一覧になります）。
 SHOW TABLES;
 
+-- 💡 なぜ：スキーマを削除すると、正規化関数（norm_code・norm_name）も一緒に削除されることを確かめます。
 SHOW USER FUNCTIONS;
 
 -- SQL エディタで削除する場合（スキーマ名を確認してからコメントを外して実行）

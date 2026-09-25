@@ -11,6 +11,16 @@
 
 # COMMAND ----------
 
+# MAGIC %md
+# MAGIC ### 期待値との照合
+# MAGIC
+# MAGIC > **💡 解説**
+# MAGIC > - **なぜ**：ガイドに書いた期待値（件数・金額・分類・スコアなど）と、実際の結果が一致するかを自動で確かめます。講師が本番の前に、環境とデータの状態を確かめるためのものです。
+# MAGIC > - **仕組み**：SQL は 00_config の `qualify()` で名前を完全な形にしてから実行します。`check()` が項目ごとに一致・不一致を表示し、1つでも不一致があれば最後の `assert` で失敗します。
+# MAGIC > - **利点**：ジョブで実行すると、不一致があればジョブが失敗するので、手順やデータを直したときの確認（回帰テスト）に使えます。
+
+# COMMAND ----------
+
 def q(sql):
     """00_config の qualify() で名前を完全修飾してから実行する。"""
     return spark.sql(qualify(sql))
@@ -33,6 +43,10 @@ def check(name, actual, expected):
 for table, n in [("canonical_vehicle", 4), ("vehicle_alias_master", 22), ("alias_mapping_history", 5),
                  ("development_plan", 9), ("sales_actual", 26), ("production_actual", 11), ("vehicle_bom", 12)]:
     check(f"件数 {table}", one(f"SELECT count(*) AS n FROM {table}").n, n)
+
+# Exercise 2-0：過去の人手承認履歴が Volume の Excel から取り込まれていること
+r = one("SELECT count(*) AS n, max(source_file) AS f, count_if(history_status = 'APPROVED') AS approved FROM alias_mapping_history")
+check("履歴の取り込み元（Volume の Excel）", (r.n, r.approved, r.f.endswith("/handson_files/alias_mapping_history.xlsx")), (5, 3, True))
 
 # Exercise 2 / 4：VEHICLE-001 の採算
 r = one("""SELECT sum(planned_material_cost) AS plan, sum(actual_material_cost) AS actual,

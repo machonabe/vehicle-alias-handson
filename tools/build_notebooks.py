@@ -8,6 +8,8 @@
   代わりに `%run ./00_config` セルを入れる。カタログ・スキーマ名は config/00_config.py で一元管理する。
 - config/00_config.py・notebook_src/*.py・tests/*.py（Databricks ソース形式）を .ipynb に変換する。
 - dashboard/vehicle_profitability.lvdash.json を 08b のノートブックに埋め込む。
+- SQL の「-- @notebook-replace-begin <スニペット> 〜 -- @notebook-replace-end」は、ノートブックではスニペット（Python）のセルに置き換える
+  （例：SQL エディタ版は CSV を read_files で取り込み、ノートブック版は Excel を Volume から取り込む）。
 """
 import json
 import re
@@ -20,6 +22,7 @@ DASHBOARD_JSON = ROOT / "dashboard" / "vehicle_profitability.lvdash.json"
 SQL_KEYWORD = re.compile(r"^(SELECT|UPDATE|FROM|JOIN|WHERE|ORDER|GROUP|DROP|ALTER|INSERT|CREATE|WITH|MERGE|USE)\b", re.I)
 DELIMITER = re.compile(r"^[-=]{5,}$")
 CONFIG_BLOCK = re.compile(r"-- @config-begin.*?-- @config-end\n", re.S)
+REPLACE_BLOCK = re.compile(r"-- @notebook-replace-begin (\S+)\n.*?-- @notebook-replace-end\n", re.S)
 RUN_CONFIG = "%run ./00_config"
 SQL_NOTE = ("このノートブックの SQL は `run_sql()`（`00_config` で定義）で実行します。"
             "テーブル・View・関数の名前には、`00_config` のカタログ・スキーマが自動で付きます"
@@ -66,9 +69,24 @@ def notebook(cells, name):
     }
 
 
+def explain_to_md(explains):
+    """「💡 なぜ：…」形式の行を、解説の引用ブロックにする。"""
+    items = []
+    for e in explains:
+        label, sep, text = e.partition("：")
+        items.append(f"> - **{label.strip()}**：{text.strip()}" if sep else f"> - {e.strip()}")
+    return "> **💡 解説**\n" + "\n".join(items)
+
+
 def comment_block_to_md(lines):
     body = [re.sub(r"^--\s?", "", l) for l in lines]
     body = [b for b in body if not DELIMITER.match(b.strip())]
+    # 「-- 💡 なぜ：…」の行は、解説ブロックとして最後にまとめる
+    explains = [b.strip()[1:].strip() for b in body if b.strip().startswith("💡")]
+    body = [b for b in body if not b.strip().startswith("💡")]
+    if explains:
+        md = comment_block_to_md(["-- " + b for b in body]) if body else ""
+        return (md + "\n\n" if md else "") + explain_to_md(explains)
     # コメントアウトされた SQL（キーワード始まりの行とその継続行）は ```sql で囲む
     out, in_sql = [], False
     for b in body:
@@ -93,8 +111,13 @@ def comment_block_to_md(lines):
 def sql_to_cells(path):
     cells = []
     text = CONFIG_BLOCK.sub("", path.read_text(encoding="utf-8"))
+    # SQL エディタ用の範囲は、ノートブック用のスニペット（Python）に置き換える
+    text = REPLACE_BLOCK.sub(lambda m: f"@@SNIPPET {m.group(1)}@@\n", text)
     paragraphs = re.split(r"\n\s*\n", text.strip())
     for para in paragraphs:
+        if para.startswith("@@SNIPPET "):
+            cells.extend(databricks_source_to_cells(ROOT / para.split()[1].rstrip("@")))
+            continue
         lines = para.splitlines()
         lines = [l for l in lines if l.strip() != EXPECT_ERROR]
         if all(l.strip().startswith("--") for l in lines):
@@ -122,6 +145,9 @@ def sql_to_cells(path):
         assert '"""' not in body, f"{path.name}: SQL に三重引用符は使えません"
         if ":h_collect" in body:
             cells.append(code_cell(WIDGETS))
+            cells.append(md_cell("上のセルを実行すると、ノートブックの上部に入力欄（`h_collect` など）が表示されます。自分の想定時間を入力してから、次のセルを実行します。\n\n"
+                                 "> **💡 解説**\n> - **仕組み**：`dbutils.widgets.text` はノートブックに入力欄（ウィジェット）を作ります。"
+                                 "次のセルでは、その値を `args` として SQL の名前付きパラメータ（`:h_collect` など）に渡します。"))
             args = "{k: dbutils.widgets.get(k) for k in " + repr(WIDGET_NAMES) + "}"
             cells.append(code_cell(f'run_sql(r"""\n{body}\n""", args={args})'))
         else:
@@ -130,6 +156,10 @@ def sql_to_cells(path):
     cells.insert(1, code_cell(RUN_CONFIG))
     cells.insert(2, md_cell(SQL_NOTE))
     if path.stem == "99_cleanup":
+        cells.append(md_cell("### スキーマをまとめて削除する\n\n"
+                             "> **💡 解説**\n"
+                             "> - **仕組み**：`DROP SCHEMA ... CASCADE` は、スキーマの中のテーブル・View・関数・Volume（Volume の中のファイルも含む）をまとめて削除します。\n"
+                             "> - **なぜ**：削除は元に戻せないので、`CONFIRM_DROP = True` にしたときだけ実行する形にしています。削除の対象は 00_config のスキーマです。"))
         cells.append(code_cell(DROP_SCHEMA))
     return cells
 
