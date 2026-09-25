@@ -1,0 +1,295 @@
+{
+  "datasets": [
+    {
+      "name": "ds_kpi",
+      "displayName": "経営KPI（期間合計）",
+      "queryLines": [
+        "SELECT MEASURE(`実績売上`) AS actual_sales, MEASURE(`計画売上`) AS plan_sales, ",
+        "MEASURE(`売上計画比`) AS sales_vs_plan, MEASURE(`材料費差額`) AS cost_variance, ",
+        "MEASURE(`1台あたり実績限界利益（簡易）`) AS unit_margin_actual, ",
+        "MEASURE(`1台あたり計画限界利益（簡易）`) AS unit_margin_plan ",
+        "FROM __FQ__.mv_vehicle_profitability ",
+        "WHERE `共通機種ID` = 'VEHICLE-001'"
+      ]
+    },
+    {
+      "name": "ds_monthly",
+      "displayName": "経営KPI（月別）",
+      "queryLines": [
+        "SELECT `月` AS month, MEASURE(`計画材料費`) AS plan_cost, MEASURE(`実績材料費`) AS actual_cost, ",
+        "MEASURE(`材料費差額`) AS cost_variance, MEASURE(`計画売上`) AS plan_sales, MEASURE(`実績売上`) AS actual_sales, ",
+        "MEASURE(`1台あたり計画限界利益（簡易）`) AS unit_margin_plan, ",
+        "MEASURE(`1台あたり実績限界利益（簡易）`) AS unit_margin_actual ",
+        "FROM __FQ__.mv_vehicle_profitability ",
+        "WHERE `共通機種ID` = 'VEHICLE-001' ",
+        "GROUP BY ALL ORDER BY month"
+      ]
+    },
+    {
+      "name": "ds_trust",
+      "displayName": "データ信頼度",
+      "queryLines": [
+        "SELECT sales_amount_coverage, cost_amount_coverage, unresolved_sales_amount, unresolved_cost_amount, ",
+        "high_violations, pending_candidates, trust_level ",
+        "FROM __FQ__.v_data_trust_summary"
+      ]
+    },
+    {
+      "name": "ds_trust_detail",
+      "displayName": "データ信頼度（内訳）",
+      "queryLines": [
+        "SELECT stack(6, ",
+        "'1. 信頼度の判定', trust_level, ",
+        "'2. 売上の変換率（金額）', concat(format_number(sales_amount_coverage * 100, 1), '%'), ",
+        "'3. 材料費の変換率（金額）', concat(format_number(cost_amount_coverage * 100, 1), '%'), ",
+        "'4. 集計に入っていない売上', concat(format_number(unresolved_sales_amount, 0), ' 百万円'), ",
+        "'5. 重要な品質ルール違反', concat(CAST(high_violations AS STRING), ' 件'), ",
+        "'6. 承認待ちの候補', concat(CAST(pending_candidates AS STRING), ' 件') ",
+        ") AS (check_item, check_value) ",
+        "FROM __FQ__.v_data_trust_summary"
+      ]
+    },
+    {
+      "name": "ds_actions",
+      "displayName": "打ち手の一覧",
+      "queryLines": [
+        "SELECT priority, category, item, impact_million_jpy, owner_role, next_action ",
+        "FROM __FQ__.v_exec_action_items ",
+        "ORDER BY priority, impact_million_jpy DESC NULLS LAST"
+      ]
+    },
+    {
+      "name": "ds_effort",
+      "displayName": "データ整備の効果（仮説）",
+      "queryLines": [
+        "SELECT concat(CAST(task_order AS STRING), '. ', task) AS task_label, current_hours, target_hours ",
+        "FROM __FQ__.effort_estimate ",
+        "ORDER BY task_order"
+      ]
+    }
+  ],
+  "pages": [
+    {
+      "name": "exec_overview",
+      "displayName": "経営サマリ",
+      "pageType": "PAGE_TYPE_CANVAS",
+      "layoutVersion": "GRID_V1",
+      "layout": [
+        {
+          "widget": {"name": "title", "multilineTextboxSpec": {"lines": ["## Model Alpha 11th Gen 採算サマリ（2025-04〜2025-09）"]}},
+          "position": {"x": 0, "y": 0, "width": 12, "height": 1}
+        },
+        {
+          "widget": {"name": "subtitle", "multilineTextboxSpec": {"lines": ["共通機種IDで計画・販売・生産を統合した経営KPI。金額は百万円・すべて架空データ。右上の「データ信頼度」で、数字がどこまで信用できるかを確認してから判断してください。"]}},
+          "position": {"x": 0, "y": 1, "width": 12, "height": 1}
+        },
+        {
+          "widget": {
+            "name": "kpi-sales",
+            "queries": [{"name": "main_query", "query": {"datasetName": "ds_kpi", "fields": [
+              {"name": "actual_sales", "expression": "`actual_sales`"},
+              {"name": "plan_sales", "expression": "`plan_sales`"}
+            ], "disaggregated": true}}],
+            "spec": {
+              "version": 2, "widgetType": "counter",
+              "encodings": {
+                "value": {"fieldName": "actual_sales", "displayName": "実績売上",
+                          "format": {"type": "number-plain", "decimalPlaces": {"type": "max", "places": 0}},
+                          "formatTemplate": "{{@formatted}} 百万円"},
+                "target": {"fieldName": "plan_sales", "displayName": "計画売上"}
+              },
+              "frame": {"showTitle": true, "title": "実績売上（計画比）"}
+            }
+          },
+          "position": {"x": 0, "y": 2, "width": 3, "height": 3}
+        },
+        {
+          "widget": {
+            "name": "kpi-cost-variance",
+            "queries": [{"name": "main_query", "query": {"datasetName": "ds_kpi", "fields": [
+              {"name": "cost_variance", "expression": "`cost_variance`"}
+            ], "disaggregated": true}}],
+            "spec": {
+              "version": 2, "widgetType": "counter",
+              "encodings": {
+                "value": {"fieldName": "cost_variance", "displayName": "材料費差額",
+                          "format": {"type": "number-plain", "decimalPlaces": {"type": "max", "places": 0}},
+                          "formatTemplate": "{{@formatted}} 百万円"}
+              },
+              "frame": {"showTitle": true, "title": "材料費差額（実績−計画）", "showDescription": true, "description": "期間合計。月別では 8月だけ計画超過"}
+            }
+          },
+          "position": {"x": 3, "y": 2, "width": 3, "height": 3}
+        },
+        {
+          "widget": {
+            "name": "kpi-unit-margin",
+            "queries": [{"name": "main_query", "query": {"datasetName": "ds_kpi", "fields": [
+              {"name": "unit_margin_actual", "expression": "`unit_margin_actual`"},
+              {"name": "unit_margin_plan", "expression": "`unit_margin_plan`"}
+            ], "disaggregated": true}}],
+            "spec": {
+              "version": 2, "widgetType": "counter",
+              "encodings": {
+                "value": {"fieldName": "unit_margin_actual", "displayName": "1台あたり実績限界利益（簡易）",
+                          "format": {"type": "number-plain", "decimalPlaces": {"type": "fixed", "places": 3}},
+                          "formatTemplate": "{{@formatted}} 百万円/台"},
+                "target": {"fieldName": "unit_margin_plan", "displayName": "計画"}
+              },
+              "frame": {"showTitle": true, "title": "1台あたり簡易限界利益（計画比）"}
+            }
+          },
+          "position": {"x": 6, "y": 2, "width": 3, "height": 3}
+        },
+        {
+          "widget": {
+            "name": "kpi-trust",
+            "queries": [{"name": "main_query", "query": {"datasetName": "ds_trust", "fields": [
+              {"name": "sales_amount_coverage", "expression": "`sales_amount_coverage`"}
+            ], "disaggregated": true}}],
+            "spec": {
+              "version": 2, "widgetType": "counter",
+              "encodings": {
+                "value": {"fieldName": "sales_amount_coverage", "displayName": "売上の変換率",
+                          "format": {"type": "number-percent", "decimalPlaces": {"type": "fixed", "places": 1}}}
+              },
+              "frame": {"showTitle": true, "title": "データ信頼度（売上の変換率）", "showDescription": true, "description": "共通機種IDに変換でき、集計に入っている売上の割合"}
+            }
+          },
+          "position": {"x": 9, "y": 2, "width": 3, "height": 3}
+        },
+        {
+          "widget": {
+            "name": "chart-cost",
+            "queries": [{"name": "main_query", "query": {"datasetName": "ds_monthly", "fields": [
+              {"name": "month", "expression": "`month`"},
+              {"name": "plan_cost", "expression": "`plan_cost`"},
+              {"name": "actual_cost", "expression": "`actual_cost`"}
+            ], "disaggregated": true}}],
+            "spec": {
+              "version": 3, "widgetType": "line",
+              "encodings": {
+                "x": {"fieldName": "month", "scale": {"type": "temporal"}, "displayName": "月"},
+                "y": {"scale": {"type": "quantitative"}, "fields": [
+                  {"fieldName": "plan_cost", "displayName": "計画材料費"},
+                  {"fieldName": "actual_cost", "displayName": "実績材料費"}
+                ], "axis": {"title": "百万円"}}
+              },
+              "frame": {"showTitle": true, "title": "材料費：計画 vs 実績（月別・百万円）"}
+            }
+          },
+          "position": {"x": 0, "y": 5, "width": 6, "height": 5}
+        },
+        {
+          "widget": {
+            "name": "chart-unit-margin",
+            "queries": [{"name": "main_query", "query": {"datasetName": "ds_monthly", "fields": [
+              {"name": "month", "expression": "`month`"},
+              {"name": "unit_margin_plan", "expression": "`unit_margin_plan`"},
+              {"name": "unit_margin_actual", "expression": "`unit_margin_actual`"}
+            ], "disaggregated": true}}],
+            "spec": {
+              "version": 3, "widgetType": "bar",
+              "encodings": {
+                "x": {"fieldName": "month", "scale": {"type": "temporal"}, "displayName": "月"},
+                "y": {"scale": {"type": "quantitative"}, "fields": [
+                  {"fieldName": "unit_margin_plan", "displayName": "計画"},
+                  {"fieldName": "unit_margin_actual", "displayName": "実績"}
+                ], "axis": {"title": "百万円/台"}}
+              },
+              "mark": {"layout": "group"},
+              "frame": {"showTitle": true, "title": "1台あたり簡易限界利益（月別・百万円/台）"}
+            }
+          },
+          "position": {"x": 6, "y": 5, "width": 6, "height": 5}
+        },
+        {
+          "widget": {"name": "header-actions", "multilineTextboxSpec": {"lines": ["### 手を打つべき項目と、数字の信頼度"]}},
+          "position": {"x": 0, "y": 10, "width": 12, "height": 1}
+        },
+        {
+          "widget": {
+            "name": "table-actions",
+            "queries": [{"name": "main_query", "query": {"datasetName": "ds_actions", "fields": [
+              {"name": "priority", "expression": "`priority`"},
+              {"name": "category", "expression": "`category`"},
+              {"name": "item", "expression": "`item`"},
+              {"name": "impact_million_jpy", "expression": "`impact_million_jpy`"},
+              {"name": "owner_role", "expression": "`owner_role`"},
+              {"name": "next_action", "expression": "`next_action`"}
+            ], "disaggregated": true}}],
+            "spec": {
+              "version": 2, "widgetType": "table",
+              "encodings": {"columns": [
+                {"fieldName": "priority", "displayName": "優先"},
+                {"fieldName": "category", "displayName": "区分"},
+                {"fieldName": "item", "displayName": "内容"},
+                {"fieldName": "impact_million_jpy", "displayName": "影響額（百万円）"},
+                {"fieldName": "owner_role", "displayName": "担当"},
+                {"fieldName": "next_action", "displayName": "次の一手"}
+              ]},
+              "frame": {"showTitle": true, "title": "打ち手の一覧"}
+            }
+          },
+          "position": {"x": 0, "y": 11, "width": 8, "height": 6}
+        },
+        {
+          "widget": {
+            "name": "table-trust",
+            "queries": [{"name": "main_query", "query": {"datasetName": "ds_trust_detail", "fields": [
+              {"name": "check_item", "expression": "`check_item`"},
+              {"name": "check_value", "expression": "`check_value`"}
+            ], "disaggregated": true}}],
+            "spec": {
+              "version": 2, "widgetType": "table",
+              "encodings": {"columns": [
+                {"fieldName": "check_item", "displayName": "確認項目"},
+                {"fieldName": "check_value", "displayName": "状態"}
+              ]},
+              "frame": {"showTitle": true, "title": "データ信頼度の内訳"}
+            }
+          },
+          "position": {"x": 8, "y": 11, "width": 4, "height": 6}
+        },
+        {
+          "widget": {"name": "header-effort", "multilineTextboxSpec": {"lines": ["### データ整備の効果（仮説・PoC で測定する）"]}},
+          "position": {"x": 0, "y": 17, "width": 12, "height": 1}
+        },
+        {
+          "widget": {
+            "name": "chart-effort",
+            "queries": [{"name": "main_query", "query": {"datasetName": "ds_effort", "fields": [
+              {"name": "task_label", "expression": "`task_label`"},
+              {"name": "current_hours", "expression": "`current_hours`"},
+              {"name": "target_hours", "expression": "`target_hours`"}
+            ], "disaggregated": true}}],
+            "spec": {
+              "version": 3, "widgetType": "bar",
+              "encodings": {
+                "x": {"fieldName": "task_label", "scale": {"type": "categorical"}, "displayName": "工程"},
+                "y": {"scale": {"type": "quantitative"}, "fields": [
+                  {"fieldName": "current_hours", "displayName": "現状（仮）"},
+                  {"fieldName": "target_hours", "displayName": "導入後（仮説）"}
+                ], "axis": {"title": "時間"}}
+              },
+              "mark": {"layout": "group"},
+              "frame": {"showTitle": true, "title": "新機種1台分のコスト積み上げ時間（工程別・仮説）"}
+            }
+          },
+          "position": {"x": 0, "y": 18, "width": 12, "height": 5}
+        }
+      ]
+    }
+  ],
+  "uiSettings": {
+    "theme": {
+      "canvasBackgroundColor": {"light": "#FCFCFC", "dark": "#1F272D"},
+      "widgetBackgroundColor": {"light": "#FFFFFF", "dark": "#11171C"},
+      "widgetBorderColor": {"light": "#FFFFFF", "dark": "#11171C"},
+      "fontColor": {"light": "#11171C", "dark": "#E8ECF0"},
+      "selectionColor": {"light": "#2272B4", "dark": "#8ACAFF"},
+      "visualizationColors": ["#4E79A7", "#F28E2C", "#E15759", "#76B7B2", "#59A14F", "#EDC948", "#B07AA1"],
+      "widgetHeaderAlignment": "LEFT"
+    }
+  }
+}
